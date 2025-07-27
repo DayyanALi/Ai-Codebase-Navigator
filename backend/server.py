@@ -1,48 +1,26 @@
 import os
 import stat
-import shutil
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from git import Repo
-from langchain_community.document_loaders import DirectoryLoader
-from langchain.document_loaders import TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import GithubFileLoader
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.messages import SystemMessage, HumanMessage, AIMessage 
+from langchain_core.messages import HumanMessage, AIMessage 
 from langchain.vectorstores import FAISS
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-
+import faiss, pickle
+from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini
+from template import chat_model_template, rephrase_question_template
 
 load_dotenv()
 app = Flask(__name__)
-
 CORS(app, resources={r"/*": {"origins": "*"}}) 
-
 session_counter = 1
-
 Clients = {}
-
-rephrase_system = """\
-You are a question-rewriting assistant. Your job is to turn a possibly ambiguous follow-up question into a fully self-contained, specific question. Always include:
-
-- The exact filename (e.g. “main.py”)  
-- If you know it, the line number or range (e.g. “lines 10–15”)  
-- The code element name (e.g. “while loop”)  
-
-If the user’s question is already self-contained, return it verbatim.  
-
-Now apply this logic to the conversation below.
-
-Conversation history:  
-{history}
-
-User’s latest question:  
-{question}
-
-Respond with only the rewritten question—no extra commentary.
-"""
+embed_model = embedding_model()
+chat_model = openai_gpt4mini()
 
 EXT_TO_LANG = {
     "cpp": "cpp",
@@ -78,10 +56,21 @@ def _on_rm_error(func, path, exc_info):
     else:
         raise
 
+
+def store_vector_store(session_id, vector_store):
+    Clients[session_id] = {
+        "vector_store": vector_store,
+        "history": []
+    }
+
+
+def retrieve_vector_store(session_id, embedding_model):
+    return Clients[session_id]["vector_store"]
+
 def get_rephrased_question(question: str, chat_history, chat_model):
     history = chat_history
     prompt = PromptTemplate(
-        template=rephrase_system,
+        template=rephrase_question_template,
         input_variables=["history", "question"]
     )
     parser = StrOutputParser()
@@ -98,31 +87,17 @@ def query_repo():
     
     try:
         chat_history = Clients[session_id]["history"]
-        chat_model = ChatOpenAI(model="gpt-3.5-turbo")
+        # chat_model = llama3()
+        vector_store = retrieve_vector_store(session_id=session_id, embedding_model=embed_model)
+
         rephrased_question = get_rephrased_question(question, chat_history, chat_model)
         parser = StrOutputParser()
-
-        vector_store = Clients[session_id]["vector_store"]
         retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
-
-        retrieved_code = retriever.invoke(rephrased_question)
+        retrieved_code = retriever.invoke(question)
         combined_result = "\n\n".join(code.page_content for code in retrieved_code)
-        
+
         prompt = PromptTemplate(
-            template="""
-                You are a code explainer assistant.  Given some code snippets and a question, you will:
-                1. Read the code carefully (it may come from different files).
-                2. Explain in plain English how the code works.
-                3. Directly answer the user’s question, pointing out relevant lines if helpful.
-                4. When writing the answer dont say words such as based on the code snippets, just explain the code.
-                5. If the code snippet does not answer the question simply say "Could not find an answer".
-                
-                The Context Code snippets:
-                {context}
-                
-                The question of the user:
-                {question}
-            """,
+            template=chat_model_template,
             input_variables=["question", "context"]
         )
         chain = prompt | chat_model | parser
@@ -135,58 +110,43 @@ def query_repo():
         print("error",e)
         return jsonify({"error": "Session not found"}), 400
 
-@app.route('/clone',methods=["POST"])
+
+@app.route('/clone', methods=["POST"])
 def clone_repo():
     global session_counter
     print("session counter", session_counter)
     data = request.get_json()
+    repo_name = data["repo_name"]
+    branch_name = data["branch_name"]
     try:
-        cwd = os.getcwd()
-        base = os.path.join(cwd, "sessions")
-        os.makedirs(base, exist_ok=True)              # ensure the root exists
-        session_id = str(session_counter)
-        session_counter += 1
-        session_dir = os.path.join(base, session_id)
-        repo_dir    = os.path.join(session_dir, "repo")
-        index_dir   = os.path.join(session_dir, "index")
-
-        os.makedirs(repo_dir, exist_ok=True)
-        os.makedirs(index_dir, exist_ok=True)
-        
-        repo_url = data["repo_url"]
-        Repo.clone_from(repo_url, repo_dir)
-        # Load code files
-        loader = DirectoryLoader(
-            repo_dir,
-            glob="**/*",
-            loader_cls=TextLoader,
-            loader_kwargs={"encoding": "utf-8"},
+        loader = GithubFileLoader(
+            repo=repo_name,
+            branch=branch_name,
+            access_token=os.environ["ACCESS_TOKEN"],
+            file_filter=lambda file_path: file_path.endswith(('.py', '.md', '.yaml', '.yml', '.json', '.txt', 'cpp', '.html'))
         )
+        # print("loading")
         docs = loader.load()
-        embedding_model = OpenAIEmbeddings(model="text-embedding-3-small")
-        all_chunks = []
-        for doc in docs:
-            ext = doc.metadata["source"].split(".")[-1]
-            lang = EXT_TO_LANG.get(ext)
-            if lang:
-                splitter = RecursiveCharacterTextSplitter.from_language(lang)
-            else:
-                splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=100,
-                    chunk_overlap=20,
-                )
-            chunks = splitter.split_documents([doc])
-            all_chunks.extend(chunks)
-            
-        vector_store = FAISS.from_documents(all_chunks, embedding_model)
-        vector_store.save_local(index_dir)
+        file_paths = list({doc.metadata['source'] for doc in docs})
+        # print("loaded")
+        
+        splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=20)
+        all_chunks = splitter.split_documents(docs)
 
-        Clients[session_id] = {"history": [], "vector_store": vector_store}
-        shutil.rmtree(session_dir, onerror=_on_rm_error)
-        return jsonify({"message": "Repo Added", "session_id": session_id})
+        vector_store = FAISS.from_documents(all_chunks, embed_model)
+
+        session_id = session_counter
+        store_vector_store(session_id, vector_store=vector_store)
+        session_counter+=1
+        
+        folder_structure = build_tree(file_paths, branch_name=branch_name)
+
+        return jsonify({"message": "Repo embedded in memory", "session_id": session_id,"folder_structure": folder_structure})
+
     except Exception as e:
-        print("error",e)
+        print("error", e)
         return jsonify({"error": str(e)})
+
 
 @app.route("/status")
 def status():

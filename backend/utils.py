@@ -1,0 +1,34 @@
+from langchain_openai import ChatOpenAI
+from langchain_ollama import OllamaLLM
+from langchain_huggingface import HuggingFacePipeline
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_ollama import OllamaEmbeddings
+
+def openai_gpt35(temperature: float=0.0) -> ChatOpenAI:
+    return ChatOpenAI(model_name="gpt-3.5-turbo")
+
+def openai_gpt4mini(temperature: float=0.0) -> ChatOpenAI:
+    return ChatOpenAI(model_name="gpt-4.1-nano-2025-04-14")
+
+def llama3(max_new_tokens: int=1024, temperature: float=0.0) -> HuggingFacePipeline:
+    return OllamaLLM(model="llama3.2")
+
+def embedding_model_openai() -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(model="text-embedding-3-small")
+
+def embedding_model() -> HuggingFacePipeline:
+    return OllamaEmbeddings(model="nomic-embed-text:latest")
+
+def build_tree(paths, branch_name='main'):
+    tree = {}
+    for path in paths:
+        parts = path.split('/')
+        if branch_name not in parts:
+            continue  
+
+        branch_index = parts.index(branch_name)
+        relevant_parts = parts[branch_index + 1:]  # everything after the branch
+        current = tree
+        for part in relevant_parts:
+            current = current.setdefault(part, {})
+    return tree
