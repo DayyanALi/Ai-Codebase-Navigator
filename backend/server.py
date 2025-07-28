@@ -7,10 +7,8 @@ from langchain_community.document_loaders import GithubFileLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage 
 from langchain.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-import faiss, pickle
 from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini
 from template import chat_model_template, rephrase_question_template
 
