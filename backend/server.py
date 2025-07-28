@@ -157,4 +157,4 @@ def home():
     return "Welcome to home page"
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()
