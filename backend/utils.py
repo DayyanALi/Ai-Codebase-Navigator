@@ -8,6 +8,9 @@ def openai_gpt35(temperature: float=0.0) -> ChatOpenAI:
 def openai_gpt4mini(temperature: float=0.0) -> ChatOpenAI:
     return ChatOpenAI(model_name="gpt-4.1-nano-2025-04-14")
 
+def openai_gpt5nano(temperature: float=0.0) -> ChatOpenAI:
+    return ChatOpenAI(model_name="gpt-5-nano")
+
 def llama3(max_new_tokens: int=1024, temperature: float=0.0) -> HuggingFacePipeline:
     return OllamaLLM(model="llama3.2")
 
@@ -30,3 +33,6 @@ def build_tree(paths, branch_name='main'):
         for part in relevant_parts:
             current = current.setdefault(part, {})
     return tree
+
+
+

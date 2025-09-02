@@ -6,7 +6,7 @@ import FileTree from './FileTree';
 
 export default function RepoNavigator() {
   const [repoName, setRepoName] = useState('');
-  const [branchName, setBranchName] = useState('');
+  const [branchName, setBranchName] = useState('main');
   const [sessionId, setSessionId] = useState(null);
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState('');
@@ -106,7 +106,7 @@ export default function RepoNavigator() {
             <svg width='64' height='64'>
               <circle cx='32' cy='32' r='8' fill={connected} />
             </svg>
-            <p className='text-gray-400'>Enter the URL of the GitHub repository you want to clone.</p>
+            <p className='text-gray-400'>Enter the name and branch of the GitHub repository you want to clone.</p>
             <input
               type='text'
               placeholder='GitHub repo name'

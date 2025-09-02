@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini
+from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
 from template import chat_model_template, rephrase_question_template
 
 load_dotenv()
@@ -18,7 +18,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 session_counter = 1
 Clients = {}
 embed_model = embedding_model()
-chat_model = openai_gpt4mini()
+chat_model = openai_gpt5nano()
 
 EXT_TO_LANG = {
     "cpp": "cpp",
@@ -45,6 +45,8 @@ EXT_TO_LANG = {
     "lua": "lua",
     "pl": "perl",
     "hs": "haskell",
+    "xml": "xml",
+    "h":"h"
 }
 
 def _on_rm_error(func, path, exc_info):
@@ -93,7 +95,7 @@ def query_repo():
         retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
         retrieved_code = retriever.invoke(question)
         combined_result = "\n\n".join(code.page_content for code in retrieved_code)
-
+        print("combined result:", combined_result)
         prompt = PromptTemplate(
             template=chat_model_template,
             input_variables=["question", "context"]
@@ -121,15 +123,16 @@ def clone_repo():
             repo=repo_name,
             branch=branch_name,
             access_token=os.environ["ACCESS_TOKEN"],
-            file_filter=lambda file_path: file_path.endswith(('.py', '.md', '.yaml', '.yml', '.json', '.txt', 'cpp', '.html'))
+            file_filter=lambda file_path: file_path.endswith(tuple(EXT_TO_LANG.keys()))
         )
         # print("loading")
         docs = loader.load()
         file_paths = list({doc.metadata['source'] for doc in docs})
-        # print("loaded")
+        # print("loaded",file_paths)
         
-        splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=20)
+        splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
         all_chunks = splitter.split_documents(docs)
+        # print("split into chunks", all_chunks)
 
         vector_store = FAISS.from_documents(all_chunks, embed_model)
 
@@ -155,5 +158,5 @@ def home():
     return "Welcome to home page"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050)
+    app.run(host="0.0.0.0", port=5050, debug=True)
     # app.run()
