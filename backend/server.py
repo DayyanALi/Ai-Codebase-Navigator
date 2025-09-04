@@ -11,6 +11,7 @@ from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
 from template import chat_model_template, rephrase_question_template
+from retrival import build_vector_db, split_documents, retrieve_context
 
 load_dotenv()
 app = Flask(__name__)
@@ -64,7 +65,7 @@ def store_vector_store(session_id, vector_store):
     }
 
 
-def retrieve_vector_store(session_id, embedding_model):
+def retrieve_vector_store(session_id):
     return Clients[session_id]["vector_store"]
 
 def get_rephrased_question(question: str, chat_history, chat_model):
@@ -88,13 +89,14 @@ def query_repo():
     try:
         chat_history = Clients[session_id]["history"]
         # chat_model = llama3()
-        vector_store = retrieve_vector_store(session_id=session_id, embedding_model=embed_model)
+        vector_store = retrieve_vector_store(session_id=session_id)
 
         rephrased_question = get_rephrased_question(question, chat_history, chat_model)
         parser = StrOutputParser()
-        retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
-        retrieved_code = retriever.invoke(question)
-        combined_result = "\n\n".join(code.page_content for code in retrieved_code)
+        # retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
+        # retrieved_code = retriever.invoke(question)
+        combined_result = retrieve_context(vector_store, rephrased_question)
+        # combined_result = "\n\n".join(code.page_content for code in retrieved_code)
         print("combined result:", combined_result)
         prompt = PromptTemplate(
             template=chat_model_template,
@@ -130,11 +132,13 @@ def clone_repo():
         file_paths = list({doc.metadata['source'] for doc in docs})
         # print("loaded",file_paths)
         
-        splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
-        all_chunks = splitter.split_documents(docs)
+        # splitter = RecursiveCharacterTextSplitter.from_language(chunk_size=200, chunk_overlap=50)
+        # all_chunks = splitter.split_documents(docs)
+        all_chunks = split_documents(docs)
+        vector_store = build_vector_db(all_chunks, embed_model)
         # print("split into chunks", all_chunks)
 
-        vector_store = FAISS.from_documents(all_chunks, embed_model)
+        # vector_store = FAISS.from_documents(all_chunks, embed_model)
 
         session_id = session_counter
         store_vector_store(session_id, vector_store=vector_store)
