@@ -97,7 +97,7 @@ def query_repo():
         # retrieved_code = retriever.invoke(question)
         combined_result = retrieve_context(vector_store, rephrased_question)
         # combined_result = "\n\n".join(code.page_content for code in retrieved_code)
-        print("combined result:", combined_result)
+        # print("combined result:", combined_result)
         prompt = PromptTemplate(
             template=chat_model_template,
             input_variables=["question", "context"]
