@@ -18,7 +18,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}) 
 session_counter = 1
 Clients = {}
-embed_model = embedding_model()
+embed_model = embedding_model_openai()
 chat_model = openai_gpt5nano()
 
 EXT_TO_LANG = {
@@ -162,5 +162,5 @@ def home():
     return "Welcome to home page"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    app.run(host="0.0.0.0", port=5050)
     # app.run()
