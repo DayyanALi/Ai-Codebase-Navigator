@@ -76,6 +76,7 @@ export default function RepoNavigator() {
         question: question,
       });
       setAnswer(res.data.answer);
+      setQuestion("")
       //   setSources(res.data.sources);
     } catch (e) {
       setQueryError(e.message || 'Error fetching answer');
@@ -96,7 +97,7 @@ export default function RepoNavigator() {
   };
 
   return (
-    <div className='min-h-screen bg-[#ffffdd] flex justify-center items-center p-4'>
+    <div className='min-h-screen bg-[#555677] flex justify-center items-center p-4'>
       <div className='bg-[#223377] p-6 rounded-2xl w-full max-w-3xl space-y-6'>
         {!sessionId ? (
           <div className='space-y-6'>

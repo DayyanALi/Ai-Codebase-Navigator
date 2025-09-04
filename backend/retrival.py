@@ -1,5 +1,3 @@
-# pip install langchain langchain-community langchain-text-splitters faiss-cpu rank-bm25 sentence-transformers
-
 from typing import List, Tuple, Dict, Optional
 from pathlib import Path
 import ast, hashlib
@@ -9,15 +7,12 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter, Language
 from langchain_community.vectorstores import FAISS
 from langchain_community.retrievers import BM25Retriever
 
-# Optional tiny cross-encoder for better precision (safe to omit)
 try:
     from sentence_transformers import CrossEncoder
     _CE = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     # _CE = None
 except Exception:
     _CE = None
-
-# ---------- Language helpers
 
 LANG_MAP = {
     ".py": Language.PYTHON,
@@ -43,8 +38,6 @@ def _compute_line_span(full_text: str, snippet: str, start_idx_hint: int = 0):
     end_line = start_line + snippet.count("\n")
     return start_line, end_line, i + len(snippet)
 
-# ---------- 1) SPLIT: symbol-aware for Python; language-aware fallback for others
-
 def split_documents(docs: List[Document],
                     code_chunk_size: int = 900,
                     code_chunk_overlap: int = 150) -> List[Document]:
@@ -56,7 +49,6 @@ def split_documents(docs: List[Document],
         source = d.metadata.get("source") if d.metadata else None
         lang = _lang_for_source(source)
 
-        # Python: prefer AST function/class chunks
         if lang == Language.PYTHON:
             try:
                 tree = ast.parse(text)
@@ -80,11 +72,10 @@ def split_documents(docs: List[Document],
                             )
                             out.append(chunk)
                 if any(md.get("kind") in ("function", "class") for md in (c.metadata for c in out if c.metadata and c.metadata.get("path")==source)):
-                    continue  # we already produced symbol chunks for this file
+                    continue  
             except Exception:
-                pass  # fall through to fallback splitter
+                pass  
 
-        # Fallback: language-aware recursive splitter (keeps identifiers intact)
         splitter = (RecursiveCharacterTextSplitter.from_language(language=lang,
                                                                  chunk_size=code_chunk_size,
                                                                  chunk_overlap=code_chunk_overlap)
@@ -108,17 +99,12 @@ def split_documents(docs: List[Document],
             )
     return out
 
-# ---------- 2) BUILD VECTOR DB: FAISS (vectors) + BM25 (lexical), all in-memory
-
 def build_vector_db(chunks: List[Document], embed_model) -> Dict[str, object]:
     """Return an in-memory bundle: {'vector': FAISS, 'bm25': BM25Retriever}."""
     vector = FAISS.from_documents(chunks, embed_model)
     bm25 = BM25Retriever.from_documents(chunks)
     bm25.k = 25
     return {"vector": vector, "bm25": bm25}
-
-# ---------- Hybrid search (RRF) + optional rerank + stitching
-
 
 def _doc_key(d: Document) -> str:
     path = (d.metadata or {}).get("path")
@@ -161,7 +147,6 @@ def _rerank(query: str, candidates: List[Document]) -> List[Document]:
     order = list(reversed(scores.argsort()))
     return [candidates[i] for i in order]
 
-# ---------- 3) RETRIEVE CONTEXT: hybrid + (optional) rerank + stitched block
 def retrieve_context(
     vdb: Dict[str, object],
     query: str,
@@ -178,9 +163,8 @@ def retrieve_context(
     vector: FAISS = vdb["vector"]
     bm25: BM25Retriever = vdb["bm25"]
 
-    # ✅ use invoke() (not get_relevant_documents)
-    v_hits = vector.similarity_search_with_score(query, k=k_vec)   # [(doc, distance)]
-    b_hits = bm25.invoke(query)[:k_lex]                            # [doc]
+    v_hits = vector.similarity_search_with_score(query, k=k_vec)   
+    b_hits = bm25.invoke(query)[:k_lex]                            
 
     candidates = _rrf_fuse(v_hits, b_hits, k=50)
     if use_reranker:

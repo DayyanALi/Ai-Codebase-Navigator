@@ -2,13 +2,14 @@ import os
 import stat
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import GithubFileLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage 
 from langchain.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-from utils import embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
+from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
 from template import chat_model_template, rephrase_question_template
 from retrival import build_vector_db, split_documents, retrieve_context
 
@@ -17,7 +18,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}) 
 session_counter = 1
 Clients = {}
-embed_model = embedding_model_openai()
+embed_model = embedding_model()
 chat_model = openai_gpt5nano()
 
 EXT_TO_LANG = {
@@ -49,20 +50,11 @@ EXT_TO_LANG = {
     "h":"h"
 }
 
-def _on_rm_error(func, path, exc_info):
-    if not os.access(path, os.W_OK):
-        os.chmod(path, stat.S_IWRITE)
-        func(path)
-    else:
-        raise
-
-
 def store_vector_store(session_id, vector_store):
     Clients[session_id] = {
         "vector_store": vector_store,
         "history": []
     }
-
 
 def retrieve_vector_store(session_id):
     return Clients[session_id]["vector_store"]
@@ -87,16 +79,11 @@ def query_repo():
     
     try:
         chat_history = Clients[session_id]["history"]
-        # chat_model = llama3()
         vector_store = retrieve_vector_store(session_id=session_id)
 
         rephrased_question = get_rephrased_question(question, chat_history, chat_model)
         parser = StrOutputParser()
-        # retriever = vector_store.as_retriever(search_type="similarity", search_kwargs={"k": 2})
-        # retrieved_code = retriever.invoke(question)
         combined_result = retrieve_context(vector_store, rephrased_question)
-        # combined_result = "\n\n".join(code.page_content for code in retrieved_code)
-        # print("combined result:", combined_result)
         prompt = PromptTemplate(
             template=chat_model_template,
             input_variables=["question", "context"]
@@ -115,7 +102,6 @@ def query_repo():
 @app.route('/clone', methods=["POST"])
 def clone_repo():
     global session_counter
-    print("session counter", session_counter)
     data = request.get_json()
     repo_name = data["repo_name"]
     branch_name = data["branch_name"]
@@ -126,19 +112,12 @@ def clone_repo():
             access_token=os.environ["ACCESS_TOKEN"],
             file_filter=lambda file_path: file_path.endswith(tuple(EXT_TO_LANG.keys()))
         )
-        # print("loading")
         docs = loader.load()
         file_paths = list({doc.metadata['source'] for doc in docs})
-        # print("loaded",file_paths)
         
-        # splitter = RecursiveCharacterTextSplitter.from_language(chunk_size=200, chunk_overlap=50)
-        # all_chunks = splitter.split_documents(docs)
         all_chunks = split_documents(docs)
         vector_store = build_vector_db(all_chunks, embed_model)
-        # print("split into chunks", all_chunks)
-
-        # vector_store = FAISS.from_documents(all_chunks, embed_model)
-
+    
         session_id = session_counter
         store_vector_store(session_id, vector_store=vector_store)
         session_counter+=1
@@ -161,5 +140,4 @@ def home():
     return "Welcome to home page"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050)
-    # app.run()
+    app.run(host="0.0.0.0", port=5050, debug=True)
