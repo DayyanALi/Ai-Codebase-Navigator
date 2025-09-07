@@ -9,8 +9,8 @@ from langchain_community.retrievers import BM25Retriever
 
 try:
     from sentence_transformers import CrossEncoder
-    _CE = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-    # _CE = None
+    # _CE = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    _CE = None
 except Exception:
     _CE = None
 

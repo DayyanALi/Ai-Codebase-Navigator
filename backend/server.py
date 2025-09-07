@@ -6,7 +6,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import GithubFileLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage 
-from langchain.vectorstores import FAISS
+# from langchain.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
@@ -18,7 +18,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}) 
 session_counter = 1
 Clients = {}
-embed_model = embedding_model()
+embed_model = embedding_model_openai()
 chat_model = openai_gpt5nano()
 
 EXT_TO_LANG = {
@@ -76,11 +76,9 @@ def query_repo():
     question = data["question"]
     if not session_id or not question:
         return jsonify({"error": "Invalid input"}), 400
-    
     try:
         chat_history = Clients[session_id]["history"]
         vector_store = retrieve_vector_store(session_id=session_id)
-
         rephrased_question = get_rephrased_question(question, chat_history, chat_model)
         parser = StrOutputParser()
         combined_result = retrieve_context(vector_store, rephrased_question)
@@ -90,14 +88,12 @@ def query_repo():
         )
         chain = prompt | chat_model | parser
         answer = chain.invoke({"question": question, "context": combined_result})
-
         Clients[session_id]["history"].append(HumanMessage(content=rephrased_question))
         Clients[session_id]["history"].append(AIMessage(content=answer))
         return jsonify({"answer": answer})
     except Exception as e:
         print("error",e)
         return jsonify({"error": "Session not found"}), 400
-
 
 @app.route('/clone', methods=["POST"])
 def clone_repo():
@@ -114,18 +110,13 @@ def clone_repo():
         )
         docs = loader.load()
         file_paths = list({doc.metadata['source'] for doc in docs})
-        
         all_chunks = split_documents(docs)
         vector_store = build_vector_db(all_chunks, embed_model)
-    
         session_id = session_counter
         store_vector_store(session_id, vector_store=vector_store)
         session_counter+=1
-        
         folder_structure = build_tree(file_paths, branch_name=branch_name)
-
         return jsonify({"message": "Repo embedded in memory", "session_id": session_id,"folder_structure": folder_structure})
-
     except Exception as e:
         print("error", e)
         return jsonify({"error": str(e)})
