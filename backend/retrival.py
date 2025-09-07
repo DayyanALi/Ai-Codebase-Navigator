@@ -8,7 +8,7 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.retrievers import BM25Retriever
 
 try:
-    from sentence_transformers import CrossEncoder
+    # from sentence_transformers import CrossEncoder
     # _CE = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     _CE = None
 except Exception:
