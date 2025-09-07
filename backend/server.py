@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 # from langchain.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-from utils import llama3, embedding_model, embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
+from utils import embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
 from template import chat_model_template, rephrase_question_template
 from retrival import build_vector_db, split_documents, retrieve_context
 
