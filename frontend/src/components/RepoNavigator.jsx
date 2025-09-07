@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import FileTree from './FileTree';
+import AnswerCard from './AnswerCard';
 
 export default function RepoNavigator() {
   const [repoName, setRepoName] = useState('');
@@ -91,6 +92,8 @@ export default function RepoNavigator() {
       setAnswer('');
       setSources([]);
       setRepoName('');
+      const baseURL = import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
+      await axios.post(`${baseURL}/remove_repo`, { session_id: sessionId });
     } catch (e) {
       console.error('Error removing repository:', e);
     }
@@ -157,12 +160,18 @@ export default function RepoNavigator() {
               {querying ? 'Thinking...' : 'Ask'}
             </button>
             {queryError && <p className='text-red-300'>{queryError}</p>}
-            {answer && (
+            {/* {answer && (
               <div className='mt-6 bg-white p-4 rounded'>
                 <h2 className='text-xl font-semibold'>Answer</h2>
                 <p className='mt-2'>{answer}</p>
               </div>
-            )}
+            )} */}
+            {answer && (
+            <div className="mt-6">
+              <h2 className='text-xl font-semibold text-white mb-2'>Answer</h2>
+              <AnswerCard markdown={answer} />
+            </div>
+          )}
             <div>
               <button
                 onClick={removeRepo}

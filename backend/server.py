@@ -19,6 +19,7 @@ CORS(app, resources={r"/*": {"origins": "*"}})
 session_counter = 1
 Clients = {}
 embed_model = embedding_model_openai()
+# embed_model = embedding_model()
 chat_model = openai_gpt5nano()
 
 EXT_TO_LANG = {
@@ -95,6 +96,27 @@ def query_repo():
         print("error",e)
         return jsonify({"error": "Session not found"}), 400
 
+@app.route("/remove_repo", methods=["POST", "DELETE"])
+def remove_repo():
+    data = request.get_json(silent=True) or {}
+    session_id = data.get("session_id")
+    if not session_id:
+        return jsonify({"error": "session_id is required"}), 400
+
+    session = Clients.pop(session_id, None)
+    if session is None:
+        return jsonify({"message": "already evicted or not found", "session_id": session_id}), 200
+
+    try:
+        vs = session.get("vector_store")    
+        if isinstance(vs, dict):
+            vs["vector"] = None
+            vs["bm25"] = None
+    except Exception:
+        pass
+
+    return jsonify({"message": "session evicted", "session_id": session_id}), 200
+
 @app.route('/clone', methods=["POST"])
 def clone_repo():
     global session_counter
@@ -121,7 +143,6 @@ def clone_repo():
         print("error", e)
         return jsonify({"error": str(e)})
 
-
 @app.route("/status")
 def status():
     return jsonify({"message": "Welcome to status page"})
@@ -131,4 +152,5 @@ def home():
     return "Welcome to home page"
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5050, debug=True)
+    # app.run(host="0.0.0.0", port=5050, debug=True)
+    app.run(port=5050)
