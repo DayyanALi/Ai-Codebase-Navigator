@@ -1,5 +1,5 @@
-from langchain_ollama import OllamaLLM, OllamaEmbeddings
-from langchain_huggingface import HuggingFacePipeline
+# from langchain_ollama import OllamaLLM, OllamaEmbeddings
+# from langchain_huggingface import HuggingFacePipeline
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 def openai_gpt35(temperature: float=0.0) -> ChatOpenAI:
@@ -11,14 +11,14 @@ def openai_gpt4mini(temperature: float=0.0) -> ChatOpenAI:
 def openai_gpt5nano(temperature: float=0.0) -> ChatOpenAI:
     return ChatOpenAI(model_name="gpt-5-nano")
 
-def llama3(max_new_tokens: int=1024, temperature: float=0.0) -> HuggingFacePipeline:
-    return OllamaLLM(model="llama3.2")
+# def llama3(max_new_tokens: int=1024, temperature: float=0.0) -> HuggingFacePipeline:
+#     return OllamaLLM(model="llama3.2")
 
 def embedding_model_openai() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(model="text-embedding-3-small")
 
-def embedding_model() -> HuggingFacePipeline:
-    return OllamaEmbeddings(model="nomic-embed-text:latest")
+# def embedding_model() -> HuggingFacePipeline:
+#     return OllamaEmbeddings(model="nomic-embed-text:latest")
 
 def build_tree(paths, branch_name='main'):
     tree = {}
