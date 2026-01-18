@@ -1,15 +1,12 @@
 import os
-import stat
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import GithubFileLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage, AIMessage 
-# from langchain.vectorstores import FAISS
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
-from utils import embedding_model_openai, build_tree, openai_gpt4mini, openai_gpt5nano
+from utils import embedding_model_openai, build_tree, openai_gpt5nano
 from template import chat_model_template, rephrase_question_template
 from retrival import build_vector_db, split_documents, retrieve_context
 

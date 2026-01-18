@@ -1,5 +1,3 @@
-# from langchain_ollama import OllamaLLM, OllamaEmbeddings
-# from langchain_huggingface import HuggingFacePipeline
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 def openai_gpt35(temperature: float=0.0) -> ChatOpenAI:
