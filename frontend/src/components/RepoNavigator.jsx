@@ -44,13 +44,36 @@ export default function RepoNavigator() {
     setCloning(true);
     setCloneError('');
     try {
+      let finalRepoName = repoName.trim();
+      let finalBranchName = branchName.trim() || 'main';
+
+      // Auto-extract from URL if user pasted a full GitHub link
+      // e.g. https://github.com/dayyanali/repo/tree/master
+      if (finalRepoName.startsWith('http')) {
+        try {
+          const url = new URL(finalRepoName);
+          const parts = url.pathname.split('/').filter(Boolean);
+          if (parts.length >= 2) {
+            finalRepoName = `${parts[0]}/${parts[1]}`;
+            if (parts.length >= 4 && parts[2] === 'tree') {
+              finalBranchName = parts[3];
+            }
+          }
+        } catch (e) {
+          // ignore URL parse errors and fall back to whatever they typed
+        }
+      }
+
+      setRepoName(finalRepoName); // update UI to show extracted name
+      setBranchName(finalBranchName);
+
       const baseUrl =
         import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
-      const res = await axios.post(`${baseUrl}/clone`, { repo_name: repoName, branch_name: branchName });
+      const res = await axios.post(`${baseUrl}/clone`, { repo_name: finalRepoName, branch_name: finalBranchName });
       console.log('check res', res);
       if (res.data.error) {
         console.log('error', res.data.error);
-        setCloneError('Error cloning repository');
+        setCloneError(res.data.error);
       } else {
         setSessionId(res.data.session_id);
         if (res.data.folder_structure) {
@@ -59,7 +82,8 @@ export default function RepoNavigator() {
         console.log('session id set', res.data.session_id);
       }
     } catch (e) {
-      setCloneError(e.message || 'Error cloning repository');
+      const backendErr = e.response?.data?.error;
+      setCloneError(backendErr || e.message || 'Error cloning repository');
     } finally {
       setCloning(false);
     }
@@ -76,11 +100,15 @@ export default function RepoNavigator() {
         session_id: sessionId,
         question: question,
       });
-      setAnswer(res.data.answer);
-      setQuestion("")
-      //   setSources(res.data.sources);
+      if (res.data.error) {
+        setQueryError(res.data.error);
+      } else {
+        setAnswer(res.data.answer);
+        setQuestion("");
+      }
     } catch (e) {
-      setQueryError(e.message || 'Error fetching answer');
+      const backendErr = e.response?.data?.error;
+      setQueryError(backendErr || e.message || 'Error fetching answer');
     } finally {
       setQuerying(false);
     }
@@ -110,17 +138,17 @@ export default function RepoNavigator() {
             <svg width='64' height='64'>
               <circle cx='32' cy='32' r='8' fill={connected} />
             </svg>
-            <p className='text-gray-400'>Enter the name and branch of the GitHub repository you want to clone.</p>
+            <p className='text-gray-400'>Enter the name of the GitHub repository (e.g. facebook/react) or paste the full GitHub URL.</p>
             <input
               type='text'
-              placeholder='GitHub repo name'
+              placeholder='GitHub repo name or URL (e.g. https://github.com/facebook/react)'
               className='mb-4 w-full p-2 border border-gray-300 rounded-2xl text-white'
               value={repoName}
               onChange={(e) => setRepoName(e.target.value)}
             />
             <input
               type='text'
-              placeholder='Branch name'
+              placeholder='Branch name (optional, defaults to main or extracts from URL)'
               className='mb-4 w-full p-2 border border-gray-300 rounded-2xl text-white'
               value={branchName}
               onChange={(e) => setBranchName(e.target.value)}
@@ -140,42 +168,41 @@ export default function RepoNavigator() {
               Ask a Question
             </h1>
             {folderTree && (
-              <div className='bg-gray-800 p-4 rounded text-white'>
-                <h2 className='text-lg font-semibold mb-2'>File Explorer</h2>
-                <FileTree tree={folderTree} />
+              <div className='bg-zinc-800/80 p-5 rounded-2xl border border-zinc-700 shadow-sm text-zinc-100'>
+                <h2 className='text-lg font-semibold mb-3 text-white'>File Explorer</h2>
+                <div className='max-h-64 overflow-y-auto pr-2 custom-scrollbar'>
+                  <FileTree tree={folderTree} />
+                </div>
               </div>
             )}
             <textarea
-              rows={3}
+              rows={4}
               placeholder='Ask about the code...'
-              className='w-full p-2 border border-gray-300 rounded text-white'
+              className='w-full p-4 border border-zinc-600 rounded-2xl bg-zinc-700/50 text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all resize-none shadow-inner'
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
             />
-            <button
-              onClick={handleAsk}
-              disabled={querying || !question}
-              className='px-4 py-2 bg-green-500 text-white rounded disabled:opacity-50'
-            >
-              {querying ? 'Thinking...' : 'Ask'}
-            </button>
-            {queryError && <p className='text-red-300'>{queryError}</p>}
-            {/* {answer && (
-              <div className='mt-6 bg-white p-4 rounded'>
-                <h2 className='text-xl font-semibold'>Answer</h2>
-                <p className='mt-2'>{answer}</p>
-              </div>
-            )} */}
-            {answer && (
-            <div className="mt-6">
-              <h2 className='text-xl font-semibold text-white mb-2'>Answer</h2>
-              <AnswerCard markdown={answer} />
+            <div className='flex items-center gap-4'>
+              <button
+                onClick={handleAsk}
+                disabled={querying || !question}
+                className='px-6 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-medium rounded-xl disabled:opacity-50 transition-colors shadow-sm'
+              >
+                {querying ? 'Thinking...' : 'Ask'}
+              </button>
+              {queryError && <p className='text-red-400 text-sm'>{queryError}</p>}
             </div>
-          )}
-            <div>
+            {answer && (
+              <div className="mt-8 animate-fade-in relative">
+                <div className="absolute -left-3 top-0 bottom-0 w-1 bg-sky-500 rounded-full"></div>
+                <h2 className='text-xl font-semibold text-white mb-4 pl-2'>Answer</h2>
+                <AnswerCard markdown={answer} />
+              </div>
+            )}
+            <div className='pt-6 mt-4 border-t border-zinc-700/50'>
               <button
                 onClick={removeRepo}
-                className='px-4 py-2 bg-red-500 text-white rounded'
+                className='px-5 py-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/30 rounded-xl transition-colors font-medium text-sm'
               >
                 Remove Repo
               </button>

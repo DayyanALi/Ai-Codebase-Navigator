@@ -12,7 +12,7 @@ function CodeBlock({ children, lang }) {
   const copy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(text);
-    } catch {}
+    } catch { }
   }, [text]);
 
   return (
@@ -40,25 +40,28 @@ function CodeBlock({ children, lang }) {
 
 export default function AnswerCard({ markdown }) {
   return (
-    <div className="rounded-2xl border border-zinc-700 bg-zinc-800/60 p-4 text-zinc-100">
+    <div className="rounded-2xl border border-zinc-700 bg-zinc-800/80 p-6 md:p-8 shadow-lg backdrop-blur-sm text-zinc-100 font-sans tracking-wide">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeRaw, rehypeHighlight]}
         components={{
           h2: ({ node, ...props }) => (
-            <h2 className="mt-4 text-xl font-semibold text-white" {...props} />
+            <h2 className="mt-6 mb-3 text-2xl font-bold text-white tracking-tight" {...props} />
           ),
           h3: ({ node, ...props }) => (
-            <h3 className="mt-3 text-lg font-semibold text-white/90" {...props} />
+            <h3 className="mt-5 mb-2 text-xl font-semibold text-white/95" {...props} />
           ),
           p: ({ node, ...props }) => (
-            <p className="leading-7 text-zinc-200" {...props} />
+            <p className="mb-4 text-base leading-relaxed text-zinc-300" {...props} />
           ),
           ul: ({ node, ...props }) => (
-            <ul className="ml-5 list-disc space-y-1" {...props} />
+            <ul className="mb-4 ml-6 list-disc space-y-2 text-base text-zinc-300" {...props} />
           ),
           ol: ({ node, ...props }) => (
-            <ol className="ml-5 list-decimal space-y-1" {...props} />
+            <ol className="mb-4 ml-6 list-decimal space-y-2 text-base text-zinc-300" {...props} />
+          ),
+          li: ({ node, ...props }) => (
+            <li className="pl-1 leading-relaxed text-zinc-300" {...props} />
           ),
           code: ({ inline, className, children, ...props }) => {
             const match = /language-(\w+)/.exec(className || "");
@@ -76,11 +79,12 @@ export default function AnswerCard({ markdown }) {
           },
           a: ({ node, ...props }) => (
             <a
-              className="text-sky-400 underline hover:text-sky-300"
+              className="text-sky-400 underline hover:text-sky-300 transition-colors"
+              target="_blank"
+              rel="noopener noreferrer"
               {...props}
             />
           ),
-          li: ({ node, ...props }) => <li className="text-zinc-200" {...props} />,
           table: ({ node, ...props }) => (
             <div className="overflow-x-auto">
               <table

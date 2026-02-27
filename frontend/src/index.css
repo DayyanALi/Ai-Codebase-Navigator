@@ -1,2 +1,22 @@
 @import "tailwindcss";
 
+/* Custom Scrollbar for File Explorer */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background-color: #52525b; /* zinc-600 */
+  border-radius: 20px;
+}
+
+/* Simple fade in animation for the AnswerCard */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out forwards;
+}

@@ -20,24 +20,31 @@ const FileTree = ({ tree, path = '' }) => {
         const isExpanded = expandedFolders[fullPath];
 
         return (
-          <li key={fullPath} className="my-1">
+          <li key={fullPath} className="my-1.5">
             {isFile ? (
               <button
-                className={`text-blue-200 hover:underline ${selectedFile === fullPath ? 'font-bold' : ''}`}
+                className={`flex items-center text-sm transition-colors ${selectedFile === fullPath ? 'font-bold text-sky-400' : 'text-zinc-300 hover:text-sky-300'}`}
                 onClick={() => setSelectedFile(fullPath)}
               >
-                📄 {name}
+                <span className="mr-2 opacity-70">📄</span>
+                {name}
               </button>
             ) : (
               <div>
                 <button
-                  className="text-white hover:text-yellow-400 font-semibold mr-2"
+                  className="flex items-center text-sm font-medium text-zinc-100 hover:text-white transition-colors"
                   onClick={() => toggleFolder(fullPath)}
                 >
-                  {isExpanded ? '-' : '+'} {name}/
+                  <span className="mr-2 w-4 text-center font-bold opacity-70 cursor-pointer text-zinc-400">
+                    {isExpanded ? '▼' : '▶'}
+                  </span>
+                  <span className="mr-1.5 opacity-80">📁</span>
+                  {name}
                 </button>
                 {isExpanded && (
-                  <FileTree tree={subtree} path={fullPath} />
+                  <div className="ml-2 border-l border-zinc-700/50 pl-2 mt-1">
+                    <FileTree tree={subtree} path={fullPath} />
+                  </div>
                 )}
               </div>
             )}
