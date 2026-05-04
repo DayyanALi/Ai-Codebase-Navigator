@@ -1,15 +1,16 @@
 import logging
 import os
-import base64
+from uuid import uuid4
 
 import httpx
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-from utils import embedding_model_openai, build_tree, openai_gpt5nano
+from utils import embedding_model_gemini, build_tree, gemini_flash_lite
 from template import chat_model_template, rephrase_question_template
-from retrival import build_vector_db, split_documents, retrieve_context, Document
+from retrival import split_documents, Document
+from supabase_store import SupabaseVectorStore, build_context_block
 
 load_dotenv()
 
@@ -22,10 +23,11 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-session_counter = 1
 Clients = {}
-embed_model = embedding_model_openai()
-chat_model = openai_gpt5nano()
+embed_model = embedding_model_gemini()
+chat_model = gemini_flash_lite()
+vector_store = SupabaseVectorStore()
+MAX_FILE_BYTES = int(os.getenv("MAX_REPO_FILE_BYTES", "250000"))
 
 EXT_TO_LANG = {
     "cpp": "cpp",
@@ -85,6 +87,7 @@ def _fetch_repo_files(repo_name: str, branch: str) -> list[Document]:
     file_entries = [
         entry for entry in tree
         if entry["type"] == "blob" and entry["path"].endswith(_ALLOWED_EXTENSIONS)
+        and entry.get("size", 0) <= MAX_FILE_BYTES
     ]
 
     docs: list[Document] = []
@@ -110,15 +113,8 @@ def _fetch_repo_files(repo_name: str, branch: str) -> list[Document]:
 # Session helpers
 # ---------------------------------------------------------------------------
 
-def store_vector_store(session_id, vector_store):
-    Clients[session_id] = {
-        "vector_store": vector_store,
-        "history": []
-    }
-
-
-def retrieve_vector_store(session_id):
-    return Clients[session_id]["vector_store"]
+def ensure_session(session_id):
+    return Clients.setdefault(session_id, {"history": []})
 
 
 # ---------------------------------------------------------------------------
@@ -151,17 +147,27 @@ def answer_question(question: str, context: str, chat_model_inst) -> str:
 def _sanitize_error(e: Exception) -> str:
     err_str = str(e).lower()
     
-    # OpenAI quota/billing errors
+    # API quota/billing errors
     if "insufficient_quota" in err_str or "exceeded your current quota" in err_str:
-        return "OpenAI API quota exceeded. Please check your API billing details."
+        return "API quota exceeded. Please check your API billing details."
     elif "incorrect api key" in err_str or "invalid api key" in err_str:
-        return "Invalid OpenAI API key configured on the server."
+        return "Invalid API key configured on the server."
+    elif "missing gemini api key" in err_str:
+        return "Gemini API key missing. Set GEMINI_API_KEY or GOOGLE_API_KEY on the server."
+    elif "missing supabase config" in err_str:
+        return "Supabase is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the server."
+    elif "match_code_chunks" in err_str or "code_chunks" in err_str or "code_repositories" in err_str:
+        return "Supabase schema is not ready. Run backend/supabase_schema.sql in your Supabase SQL editor."
         
     # GitHub HTTP errors
     if isinstance(e, httpx.HTTPStatusError):
         status = e.response.status_code
         if status == 404:
             return "Repository or branch not found. Please verify the URL."
+        elif status == 429:
+            return "Gemini API rate limit hit while indexing embeddings. Please wait a minute, try a smaller repo, or enable billing for higher limits."
+        elif status in (500, 502, 503, 504):
+            return "Gemini API is temporarily unavailable. Please retry in a moment."
         elif status == 403:
             return "GitHub API rate limit exceeded or access denied. Please check the access token."
             
@@ -180,16 +186,21 @@ def query_repo():
     if not session_id or not question:
         return jsonify({"error": "Invalid input"}), 400
     try:
-        chat_history = Clients[session_id]["history"]
-        vector_store = retrieve_vector_store(session_id=session_id)
+        session = ensure_session(session_id)
+        chat_history = session["history"]
         rephrased_question = get_rephrased_question(question, chat_history, chat_model)
-        combined_docs, combined_result = retrieve_context(
-            vector_store, rephrased_question, embed_model=embed_model
-        )
+        query_embedding = embed_model.embed_query(rephrased_question)
+        combined_docs = vector_store.match_chunks(session_id, query_embedding)
+        combined_result = build_context_block(combined_docs)
         answer = answer_question(question, combined_result, chat_model)
-        Clients[session_id]["history"].append({"role": "user", "content": rephrased_question})
-        Clients[session_id]["history"].append({"role": "assistant", "content": answer})
-        return jsonify({"answer": answer})
+        session["history"].append({"role": "user", "content": rephrased_question})
+        session["history"].append({"role": "assistant", "content": answer})
+        sources = [
+            doc.metadata.get("path")
+            for doc in combined_docs
+            if doc.metadata and doc.metadata.get("path")
+        ]
+        return jsonify({"answer": answer, "sources": list(dict.fromkeys(sources))})
     except Exception as e:
         logger.error(f"Error in /query endpoint: {e}", exc_info=True)
         safe_msg = _sanitize_error(e)
@@ -203,42 +214,46 @@ def remove_repo():
     if not session_id:
         return jsonify({"error": "session_id is required"}), 400
 
-    session = Clients.pop(session_id, None)
-    if session is None:
-        return jsonify({"message": "already evicted or not found", "session_id": session_id}), 200
-
     try:
-        vs = session.get("vector_store")
-        if isinstance(vs, dict):
-            vs["vector"] = None
-            vs["bm25"] = None
-    except Exception:
-        pass
+        Clients.pop(session_id, None)
+        vector_store.delete_session(session_id)
+    except Exception as e:
+        logger.error(f"Error in /remove_repo endpoint: {e}", exc_info=True)
+        return jsonify({"error": _sanitize_error(e)}), 400
 
     return jsonify({"message": "session evicted", "session_id": session_id}), 200
 
 
 @app.route('/clone', methods=["POST"])
 def clone_repo():
-    global session_counter
     data = request.get_json()
     repo_name = data["repo_name"]
     branch_name = data["branch_name"]
+    session_id = str(uuid4())
     try:
         docs = _fetch_repo_files(repo_name, branch_name)
+        if not docs:
+            return jsonify({"error": "No supported source files found in this repository."}), 400
+
         file_paths = list({doc.metadata['source'] for doc in docs})
         all_chunks = split_documents(docs)
-        vector_store = build_vector_db(all_chunks, embed_model)
-        session_id = session_counter
-        store_vector_store(session_id, vector_store=vector_store)
-        session_counter += 1
+        if not all_chunks:
+            return jsonify({"error": "No indexable code chunks found in this repository."}), 400
+
+        vector_store.create_repository(session_id, repo_name, branch_name)
+        vector_store.insert_chunks(session_id, repo_name, branch_name, all_chunks, embed_model)
+        ensure_session(session_id)
         folder_structure = build_tree(file_paths, branch_name=branch_name)
         return jsonify({
-            "message": "Repo embedded in memory",
+            "message": "Repo embedded in Supabase",
             "session_id": session_id,
             "folder_structure": folder_structure,
         })
     except Exception as e:  
+        try:
+            vector_store.delete_session(session_id)
+        except Exception:
+            pass
         logger.error(f"Error in /clone endpoint: {e}", exc_info=True)
         safe_msg = _sanitize_error(e)
         return jsonify({"error": safe_msg}), 400

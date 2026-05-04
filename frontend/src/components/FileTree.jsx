@@ -1,58 +1,131 @@
-import React, { useState, useContext } from 'react';
+import React, { useContext, useMemo, useState } from 'react';
 import { selectedFileContext } from '../context/context';
 
-const FileTree = ({ tree, path = '' }) => {
-  const { selectedFile, setSelectedFile } = useContext(selectedFileContext);
-  const [expandedFolders, setExpandedFolders] = useState({});
+function fileTypeLabel(fileName) {
+  const ext = fileName.split('.').pop();
+  if (!ext || ext === fileName) return 'FILE';
+  return ext.slice(0, 4).toUpperCase();
+}
 
-  const toggleFolder = (folderPath) => {
-    setExpandedFolders((prev) => ({
-      ...prev,
-      [folderPath]: !prev[folderPath],
-    }));
-  };
+function flattenTree(tree, basePath = '') {
+  return Object.entries(tree || {}).flatMap(([name, subtree]) => {
+    const fullPath = basePath ? `${basePath}/${name}` : name;
+    const isFile = Object.keys(subtree || {}).length === 0;
+
+    if (isFile) {
+      return [{ name, path: fullPath }];
+    }
+
+    return flattenTree(subtree, fullPath);
+  });
+}
+
+function TreeBranch({ tree, path = '', expandedFolders, onToggle }) {
+  const { selectedFile, setSelectedFile } = useContext(selectedFileContext);
 
   return (
-    <ul className="text-white ml-4">
-      {Object.entries(tree).map(([name, subtree]) => {
+    <ul className="tree-list">
+      {Object.entries(tree || {}).map(([name, subtree]) => {
         const fullPath = path ? `${path}/${name}` : name;
-        const isFile = Object.keys(subtree).length === 0;
-        const isExpanded = expandedFolders[fullPath];
+        const isFile = Object.keys(subtree || {}).length === 0;
+        const isExpanded = expandedFolders[fullPath] ?? path === '';
 
         return (
-          <li key={fullPath} className="my-1.5">
+          <li key={fullPath}>
             {isFile ? (
               <button
-                className={`flex items-center text-sm transition-colors ${selectedFile === fullPath ? 'font-bold text-sky-400' : 'text-zinc-300 hover:text-sky-300'}`}
+                className={`tree-file ${selectedFile === fullPath ? 'active' : ''}`}
                 onClick={() => setSelectedFile(fullPath)}
+                title={fullPath}
               >
-                <span className="mr-2 opacity-70">📄</span>
-                {name}
+                <span>{fileTypeLabel(name)}</span>
+                <strong>{name}</strong>
               </button>
             ) : (
-              <div>
-                <button
-                  className="flex items-center text-sm font-medium text-zinc-100 hover:text-white transition-colors"
-                  onClick={() => toggleFolder(fullPath)}
-                >
-                  <span className="mr-2 w-4 text-center font-bold opacity-70 cursor-pointer text-zinc-400">
-                    {isExpanded ? '▼' : '▶'}
-                  </span>
-                  <span className="mr-1.5 opacity-80">📁</span>
-                  {name}
+              <>
+                <button className="tree-folder" onClick={() => onToggle(fullPath)}>
+                  <span>{isExpanded ? '-' : '+'}</span>
+                  <strong>{name}</strong>
                 </button>
+
                 {isExpanded && (
-                  <div className="ml-2 border-l border-zinc-700/50 pl-2 mt-1">
-                    <FileTree tree={subtree} path={fullPath} />
+                  <div className="tree-children">
+                    <TreeBranch
+                      tree={subtree}
+                      path={fullPath}
+                      expandedFolders={expandedFolders}
+                      onToggle={onToggle}
+                    />
                   </div>
                 )}
-              </div>
+              </>
             )}
           </li>
         );
       })}
     </ul>
   );
-};
+}
 
-export default FileTree;
+export default function FileTree({ tree }) {
+  const { selectedFile, setSelectedFile } = useContext(selectedFileContext);
+  const [expandedFolders, setExpandedFolders] = useState({});
+  const [search, setSearch] = useState('');
+  const files = useMemo(() => flattenTree(tree), [tree]);
+  const matches = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return [];
+    return files
+      .filter((file) => file.path.toLowerCase().includes(needle))
+      .slice(0, 12);
+  }, [files, search]);
+
+  const toggleFolder = (folderPath) => {
+    setExpandedFolders((prev) => ({
+      ...prev,
+      [folderPath]: !(prev[folderPath] ?? false),
+    }));
+  };
+
+  return (
+    <div className="file-tree">
+      <label className="tree-search">
+        <span>Search files</span>
+        <input
+          type="search"
+          placeholder="routes, package, auth..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </label>
+
+      {search ? (
+        <div className="search-results">
+          {matches.length > 0 ? (
+            matches.map((file) => (
+              <button
+                key={file.path}
+                className={selectedFile === file.path ? 'active' : ''}
+                onClick={() => setSelectedFile(file.path)}
+                title={file.path}
+              >
+                <span>{fileTypeLabel(file.name)}</span>
+                {file.path}
+              </button>
+            ))
+          ) : (
+            <p>No matching files found.</p>
+          )}
+        </div>
+      ) : (
+        <div className="tree-scroll">
+          <TreeBranch
+            tree={tree}
+            expandedFolders={expandedFolders}
+            onToggle={toggleFolder}
+          />
+        </div>
+      )}
+    </div>
+  );
+}

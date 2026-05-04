@@ -1,86 +1,170 @@
 /** @format */
 
-import React, { useEffect, useState } from 'react';
+import React, { useContext, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import FileTree from './FileTree';
 import AnswerCard from './AnswerCard';
+import { selectedFileContext } from '../context/context';
+
+const baseUrl = import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
+
+const starterQuestions = [
+  'Give me a high-level architecture map of this repo.',
+  'Where does the main request flow start and end?',
+  'Which files should I read first to understand the project?',
+  'Find likely bugs, risky code paths, and missing tests.',
+];
+
+const quickExamples = [
+  { repo: 'octocat/Hello-World', branch: 'master' },
+  { repo: 'sindresorhus/is', branch: 'main' },
+  { repo: 'ai/nanoid', branch: 'main' },
+];
+
+const emptyStats = {
+  files: 0,
+  folders: 0,
+  topLevel: 0,
+};
+
+function parseRepositoryInput(input, branch) {
+  let finalRepoName = input.trim();
+  let finalBranchName = branch.trim() || 'main';
+
+  if (finalRepoName.startsWith('http')) {
+    try {
+      const url = new URL(finalRepoName);
+      const parts = url.pathname.split('/').filter(Boolean);
+
+      if (parts.length >= 2) {
+        finalRepoName = `${parts[0]}/${parts[1].replace(/\.git$/, '')}`;
+      }
+
+      if (parts.length >= 4 && parts[2] === 'tree') {
+        finalBranchName = parts[3];
+      }
+    } catch {
+      // Keep the typed value if URL parsing fails.
+    }
+  }
+
+  return { finalRepoName, finalBranchName };
+}
+
+function getTreeStats(tree) {
+  if (!tree) return emptyStats;
+
+  const walk = (node) => {
+    return Object.values(node).reduce(
+      (stats, subtree) => {
+        const isFile = Object.keys(subtree || {}).length === 0;
+
+        if (isFile) {
+          return { ...stats, files: stats.files + 1 };
+        }
+
+        const childStats = walk(subtree);
+        return {
+          files: stats.files + childStats.files,
+          folders: stats.folders + childStats.folders + 1,
+          topLevel: stats.topLevel,
+        };
+      },
+      { ...emptyStats, topLevel: Object.keys(node).length },
+    );
+  };
+
+  return walk(tree);
+}
+
+function getRecentRepos() {
+  try {
+    return JSON.parse(localStorage.getItem('recentRepos') || '[]');
+  } catch {
+    return [];
+  }
+}
 
 export default function RepoNavigator() {
+  const { selectedFile, setSelectedFile } = useContext(selectedFileContext);
   const [repoName, setRepoName] = useState('');
   const [branchName, setBranchName] = useState('main');
   const [sessionId, setSessionId] = useState(null);
   const [cloning, setCloning] = useState(false);
   const [cloneError, setCloneError] = useState('');
+  const [connectionState, setConnectionState] = useState('checking');
 
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [sources, setSources] = useState([]);
   const [querying, setQuerying] = useState(false);
   const [queryError, setQueryError] = useState('');
-  const [connected, setConnected] = useState('#f00000');
   const [folderTree, setFolderTree] = useState(null);
+  const [queryHistory, setQueryHistory] = useState([]);
+  const [recentRepos, setRecentRepos] = useState(getRecentRepos);
 
-
+  const repoStats = useMemo(() => getTreeStats(folderTree), [folderTree]);
+  const canClone = repoName.trim().length > 0 && !cloning;
+  const canAsk = question.trim().length > 0 && sessionId && !querying;
 
   useEffect(() => {
     const checkConnection = async () => {
       try {
-        const baseUrl =
-          import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
         const res = await axios.get(`${baseUrl}/status`);
-        if (res.data.message) {
-          console.log('connected');
-          setConnected('#008000');
-        }
+        setConnectionState(res.data.message ? 'online' : 'offline');
       } catch (error) {
         console.error('Error checking connection:', error);
+        setConnectionState('offline');
       }
     };
 
     checkConnection();
   }, []);
 
+  useEffect(() => {
+    localStorage.setItem('recentRepos', JSON.stringify(recentRepos));
+  }, [recentRepos]);
+
+  const saveRecentRepo = (repo, branch) => {
+    setRecentRepos((current) => {
+      const next = [
+        { repo, branch },
+        ...current.filter((item) => item.repo !== repo || item.branch !== branch),
+      ].slice(0, 4);
+
+      return next;
+    });
+  };
+
   const handleClone = async () => {
     setCloning(true);
     setCloneError('');
+    setAnswer('');
+    setSources([]);
+    setSelectedFile('');
+
     try {
-      let finalRepoName = repoName.trim();
-      let finalBranchName = branchName.trim() || 'main';
+      const { finalRepoName, finalBranchName } = parseRepositoryInput(
+        repoName,
+        branchName,
+      );
 
-      // Auto-extract from URL if user pasted a full GitHub link
-      // e.g. https://github.com/dayyanali/repo/tree/master
-      if (finalRepoName.startsWith('http')) {
-        try {
-          const url = new URL(finalRepoName);
-          const parts = url.pathname.split('/').filter(Boolean);
-          if (parts.length >= 2) {
-            finalRepoName = `${parts[0]}/${parts[1]}`;
-            if (parts.length >= 4 && parts[2] === 'tree') {
-              finalBranchName = parts[3];
-            }
-          }
-        } catch (e) {
-          // ignore URL parse errors and fall back to whatever they typed
-        }
-      }
-
-      setRepoName(finalRepoName); // update UI to show extracted name
+      setRepoName(finalRepoName);
       setBranchName(finalBranchName);
 
-      const baseUrl =
-        import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
-      const res = await axios.post(`${baseUrl}/clone`, { repo_name: finalRepoName, branch_name: finalBranchName });
-      console.log('check res', res);
+      const res = await axios.post(`${baseUrl}/clone`, {
+        repo_name: finalRepoName,
+        branch_name: finalBranchName,
+      });
+
       if (res.data.error) {
-        console.log('error', res.data.error);
         setCloneError(res.data.error);
-      } else {
-        setSessionId(res.data.session_id);
-        if (res.data.folder_structure) {
-          setFolderTree(res.data.folder_structure);
-        }
-        console.log('session id set', res.data.session_id);
+        return;
       }
+
+      setSessionId(res.data.session_id);
+      setFolderTree(res.data.folder_structure || null);
+      saveRecentRepo(finalRepoName, finalBranchName);
     } catch (e) {
       const backendErr = e.response?.data?.error;
       setCloneError(backendErr || e.message || 'Error cloning repository');
@@ -89,23 +173,44 @@ export default function RepoNavigator() {
     }
   };
 
-  const handleAsk = async () => {
+  const handleAsk = async (overrideQuestion) => {
+    const rawQuestion = (overrideQuestion || question).trim();
+    if (!rawQuestion) return;
+
     setQuerying(true);
     setQueryError('');
+
     try {
-      const baseUrl =
-        import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
-      console.log('base', baseUrl);
+      const scopedQuestion = selectedFile
+        ? `${rawQuestion}\n\nFocus on this file when relevant: ${selectedFile}`
+        : rawQuestion;
+
       const res = await axios.post(`${baseUrl}/query`, {
         session_id: sessionId,
-        question: question,
+        question: scopedQuestion,
       });
+
       if (res.data.error) {
         setQueryError(res.data.error);
-      } else {
-        setAnswer(res.data.answer);
-        setQuestion("");
+        return;
       }
+
+      setAnswer(res.data.answer);
+      setSources(res.data.sources || []);
+      setQuestion('');
+      setQueryHistory((current) =>
+        [
+          {
+            question: rawQuestion,
+            file: selectedFile,
+            at: new Date().toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+          },
+          ...current,
+        ].slice(0, 5),
+      );
     } catch (e) {
       const backendErr = e.response?.data?.error;
       setQueryError(backendErr || e.message || 'Error fetching answer');
@@ -115,101 +220,276 @@ export default function RepoNavigator() {
   };
 
   const removeRepo = async () => {
+    const activeSession = sessionId;
+
+    setSessionId(null);
+    setAnswer('');
+    setSources([]);
+    setQuestion('');
+    setQueryError('');
+    setCloneError('');
+    setFolderTree(null);
+    setSelectedFile('');
+
     try {
-      setSessionId(null);
-      setAnswer('');
-      setSources([]);
-      setRepoName('');
-      const baseURL = import.meta.env.VITE_APIGATEWAY_URI || 'http://localhost:5000';
-      await axios.post(`${baseURL}/remove_repo`, { session_id: sessionId });
+      if (activeSession) {
+        await axios.post(`${baseUrl}/remove_repo`, { session_id: activeSession });
+      }
     } catch (e) {
       console.error('Error removing repository:', e);
     }
   };
 
+  const applyRecentRepo = (repo, branch) => {
+    setRepoName(repo);
+    setBranchName(branch);
+  };
+
+  const connectionCopy = {
+    checking: 'Checking API',
+    online: 'API online',
+    offline: 'API offline',
+  }[connectionState];
+
   return (
-    <div className='min-h-screen bg-[#555677] flex justify-center items-center p-4'>
-      <div className='bg-[#223377] p-6 rounded-2xl w-full max-w-3xl space-y-6'>
-        {!sessionId ? (
-          <div className='space-y-6'>
-            <h1 className='text-4xl font-semibold text-white'>
-              Ai Codebase Navigator
-            </h1>
-            <svg width='64' height='64'>
-              <circle cx='32' cy='32' r='8' fill={connected} />
-            </svg>
-            <p className='text-gray-400'>Enter the name of the GitHub repository (e.g. facebook/react) or paste the full GitHub URL.</p>
-            <input
-              type='text'
-              placeholder='GitHub repo name or URL (e.g. https://github.com/facebook/react)'
-              className='mb-4 w-full p-2 border border-gray-300 rounded-2xl text-white'
-              value={repoName}
-              onChange={(e) => setRepoName(e.target.value)}
-            />
-            <input
-              type='text'
-              placeholder='Branch name (optional, defaults to main or extracts from URL)'
-              className='mb-4 w-full p-2 border border-gray-300 rounded-2xl text-white'
-              value={branchName}
-              onChange={(e) => setBranchName(e.target.value)}
-            />
-            <button
-              onClick={handleClone}
-              disabled={cloning || !repoName}
-              className='px-4 py-2 bg-[#ff000f] text-white rounded-2xl disabled:opacity-50'
-            >
-              {cloning ? 'Adding...' : 'Add'}
+    <main className="app-shell">
+      <section className="topbar">
+        <div>
+          <p className="eyebrow">Repository intelligence workspace</p>
+          <h1>Codebase Navigator</h1>
+        </div>
+
+        <div className={`status-pill ${connectionState}`}>
+          <span aria-hidden="true" />
+          {connectionCopy}
+        </div>
+      </section>
+
+      {!sessionId ? (
+        <section className="onboarding-grid">
+          <div className="connect-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">New analysis</p>
+                <h2>Add repository</h2>
+              </div>
+              <span className="endpoint-label">{baseUrl}</span>
+            </div>
+
+            <label className="field">
+              <span>GitHub repository</span>
+              <input
+                type="text"
+                placeholder="facebook/react or https://github.com/facebook/react"
+                value={repoName}
+                onChange={(e) => setRepoName(e.target.value)}
+              />
+            </label>
+
+            <label className="field">
+              <span>Branch</span>
+              <input
+                type="text"
+                placeholder="main"
+                value={branchName}
+                onChange={(e) => setBranchName(e.target.value)}
+              />
+            </label>
+
+            {cloneError && <p className="error-banner">{cloneError}</p>}
+
+            <button className="primary-action" onClick={handleClone} disabled={!canClone}>
+              {cloning ? 'Indexing repository...' : 'Add repository'}
             </button>
-            {cloneError && <p className='text-red-300'>{cloneError}</p>}
-          </div>
-        ) : (
-          <div className='space-y-4'>
-            <h1 className='text-2xl font-semibold text-white'>
-              Ask a Question
-            </h1>
-            {folderTree && (
-              <div className='bg-zinc-800/80 p-5 rounded-2xl border border-zinc-700 shadow-sm text-zinc-100'>
-                <h2 className='text-lg font-semibold mb-3 text-white'>File Explorer</h2>
-                <div className='max-h-64 overflow-y-auto pr-2 custom-scrollbar'>
-                  <FileTree tree={folderTree} />
+
+            {recentRepos.length > 0 && (
+              <div className="recent-block">
+                <p>Recent repositories</p>
+                <div className="recent-list">
+                  {recentRepos.map((repo) => (
+                    <button
+                      key={`${repo.repo}-${repo.branch}`}
+                      onClick={() => applyRecentRepo(repo.repo, repo.branch)}
+                    >
+                      {repo.repo}
+                      <span>{repo.branch}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
-            <textarea
-              rows={4}
-              placeholder='Ask about the code...'
-              className='w-full p-4 border border-zinc-600 rounded-2xl bg-zinc-700/50 text-white placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all resize-none shadow-inner'
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-            />
-            <div className='flex items-center gap-4'>
-              <button
-                onClick={handleAsk}
-                disabled={querying || !question}
-                className='px-6 py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-medium rounded-xl disabled:opacity-50 transition-colors shadow-sm'
-              >
-                {querying ? 'Thinking...' : 'Ask'}
-              </button>
-              {queryError && <p className='text-red-400 text-sm'>{queryError}</p>}
+          </div>
+
+          <div className="intro-panel">
+            <div>
+              <p className="eyebrow">Workspace</p>
+              <h2>Repository intake</h2>
             </div>
-            {answer && (
-              <div className="mt-8 animate-fade-in relative">
-                <div className="absolute -left-3 top-0 bottom-0 w-1 bg-sky-500 rounded-full"></div>
-                <h2 className='text-xl font-semibold text-white mb-4 pl-2'>Answer</h2>
-                <AnswerCard markdown={answer} />
+
+            <div className="intake-board" aria-label="Repository intake status">
+              <div>
+                <span>API</span>
+                <strong>{connectionCopy}</strong>
               </div>
-            )}
-            <div className='pt-6 mt-4 border-t border-zinc-700/50'>
-              <button
-                onClick={removeRepo}
-                className='px-5 py-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/30 rounded-xl transition-colors font-medium text-sm'
-              >
-                Remove Repo
-              </button>
+              <div>
+                <span>Repository</span>
+                <strong>{repoName.trim() || 'Not selected'}</strong>
+              </div>
+              <div>
+                <span>Branch</span>
+                <strong>{branchName.trim() || 'main'}</strong>
+              </div>
+              <div>
+                <span>Session</span>
+                <strong>{sessionId || 'Pending'}</strong>
+              </div>
+            </div>
+
+            <div className="preset-panel">
+              <p className="eyebrow">Quick examples</p>
+              <div className="recent-list">
+                {quickExamples.map((example) => (
+                  <button
+                    key={`${example.repo}-${example.branch}`}
+                    onClick={() => {
+                      setRepoName(example.repo);
+                      setBranchName(example.branch);
+                    }}
+                  >
+                    {example.repo}
+                    <span>{example.branch}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        )}
-      </div>
-    </div>
+        </section>
+      ) : (
+        <section className="workspace-grid">
+          <aside className="repo-sidebar">
+            <div className="repo-card">
+              <p className="eyebrow">Active repository</p>
+              <h2>{repoName}</h2>
+              <span>{branchName}</span>
+            </div>
+
+            <div className="stats-grid">
+              <div>
+                <strong>{repoStats.files}</strong>
+                <span>Files</span>
+              </div>
+              <div>
+                <strong>{repoStats.folders}</strong>
+                <span>Folders</span>
+              </div>
+              <div>
+                <strong>{repoStats.topLevel}</strong>
+                <span>Top level</span>
+              </div>
+            </div>
+
+            {folderTree && (
+              <div className="explorer-panel">
+                <div className="section-heading compact">
+                  <div>
+                    <p className="eyebrow">Repository map</p>
+                    <h2>Files</h2>
+                  </div>
+                  {selectedFile && (
+                    <button className="ghost-button" onClick={() => setSelectedFile('')}>
+                      Clear
+                    </button>
+                  )}
+                </div>
+                <FileTree tree={folderTree} />
+              </div>
+            )}
+
+            <button className="danger-action" onClick={removeRepo}>
+              Remove repository
+            </button>
+          </aside>
+
+          <section className="ask-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Agent workspace</p>
+                <h2>Ask the codebase</h2>
+              </div>
+              {selectedFile && <span className="file-scope">Scoped: {selectedFile}</span>}
+            </div>
+
+            <div className="prompt-bar">
+              {starterQuestions.map((prompt) => (
+                <button key={prompt} onClick={() => setQuestion(prompt)}>
+                  {prompt}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              rows={6}
+              placeholder="Ask about architecture, implementation details, call paths, tests, security risks, or a selected file..."
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                  handleAsk();
+                }
+              }}
+            />
+
+            <div className="action-row">
+              <button className="primary-action" onClick={() => handleAsk()} disabled={!canAsk}>
+                {querying ? 'Reasoning...' : 'Ask navigator'}
+              </button>
+              <span>Ctrl + Enter</span>
+              {queryError && <p className="inline-error">{queryError}</p>}
+            </div>
+
+            {answer ? (
+              <AnswerCard markdown={answer} sources={sources} />
+            ) : (
+              <div className="empty-answer">
+                <p className="eyebrow">Ready when you are</p>
+                <h3>Start with a system map, then drill into files and flows.</h3>
+                <p>
+                  Select a file from the explorer to scope the answer, or ask a
+                  broad question to understand the whole repository.
+                </p>
+              </div>
+            )}
+          </section>
+
+          <aside className="history-panel">
+            <div className="section-heading compact">
+              <div>
+                <p className="eyebrow">Session trail</p>
+                <h2>Recent questions</h2>
+              </div>
+            </div>
+
+            {queryHistory.length > 0 ? (
+              <div className="history-list">
+                {queryHistory.map((item, index) => (
+                  <button
+                    key={`${item.at}-${index}`}
+                    onClick={() => setQuestion(item.question)}
+                  >
+                    <span>{item.at}</span>
+                    {item.question}
+                    {item.file && <small>{item.file}</small>}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="muted-copy">
+                Questions you ask in this session will appear here for quick reuse.
+              </p>
+            )}
+          </aside>
+        </section>
+      )}
+    </main>
   );
 }

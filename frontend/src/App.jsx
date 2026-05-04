@@ -1,19 +1,16 @@
-import { useState } from 'react'
-import './App.css'
-import RepoNavigator from './components/RepoNavigator'
-import { selectedFileContext } from './context/context'
+import { useState } from 'react';
+import './App.css';
+import RepoNavigator from './components/RepoNavigator';
+import { selectedFileContext as SelectedFileContext } from './context/context';
 
 function App() {
-  const [count, setCount] = useState(0)
   const [selectedFile, setSelectedFile] = useState('');
 
   return (
-    <>
-    <selectedFileContext.Provider value={{ selectedFile, setSelectedFile }}>
-      <RepoNavigator></RepoNavigator>
-    </selectedFileContext.Provider>
-    </>
-  )
+    <SelectedFileContext.Provider value={{ selectedFile, setSelectedFile }}>
+      <RepoNavigator />
+    </SelectedFileContext.Provider>
+  );
 }
 
-export default App
+export default App;

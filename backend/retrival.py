@@ -4,11 +4,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import ast
 import hashlib
+import os
 import re
-
-import numpy as np
-import faiss
-from rank_bm25 import BM25Okapi
 
 # ---------------------------------------------------------------------------
 # Lightweight Document dataclass (replaces langchain.schema.Document)
@@ -207,6 +204,9 @@ def split_documents(docs: List[Document],
 
 def build_vector_db(chunks: List[Document], embed_model) -> Dict[str, object]:
     """Return an in-memory bundle: {'vector': ..., 'bm25': ..., 'chunks': ...}."""
+    import faiss
+    import numpy as np
+
     texts = [c.page_content for c in chunks]
 
     # --- FAISS index ---
@@ -217,10 +217,15 @@ def build_vector_db(chunks: List[Document], embed_model) -> Dict[str, object]:
     index.add(matrix)
 
     # --- BM25 ---
-    tokenized = [_tokenize(t) for t in texts]
-    bm25 = BM25Okapi(tokenized)
+    enable_bm25 = os.getenv("ENABLE_BM25", "false").lower() == "true"
+    bm25 = None
+    if enable_bm25:
+        from rank_bm25 import BM25Okapi
 
-    return {"vector": index, "bm25": bm25, "chunks": chunks, "matrix": matrix}
+        tokenized = [_tokenize(t) for t in texts]
+        bm25 = BM25Okapi(tokenized)
+
+    return {"vector": index, "bm25": bm25, "chunks": chunks}
 
 
 def _tokenize(text: str) -> list[str]:
@@ -280,6 +285,8 @@ def _rerank(query: str, candidates: List[Document]) -> List[Document]:
 
 def _faiss_search(vdb: dict, query: str, embed_model, k: int) -> list[tuple]:
     """Return [(Document, distance), ...]."""
+    import numpy as np
+
     q_emb = np.array([embed_model.embed_query(query)], dtype="float32")
     distances, indices = vdb["vector"].search(q_emb, k)
     results = []
@@ -292,6 +299,11 @@ def _faiss_search(vdb: dict, query: str, embed_model, k: int) -> list[tuple]:
 
 def _bm25_search(vdb: dict, query: str, k: int) -> list[Document]:
     """Return top-k BM25 hits."""
+    if vdb.get("bm25") is None:
+        return []
+
+    import numpy as np
+
     tokens = _tokenize(query)
     scores = vdb["bm25"].get_scores(tokens)
     top_k = np.argsort(scores)[::-1][:k]
